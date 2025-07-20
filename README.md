@@ -1,4 +1,4 @@
-# Platonic Alignment
+# Kernel Divergence Score
 
 Official implementation of ICML 2025 paper, "[How Contaminated Is Your Benchmark? Measuring Dataset Leakage in Large Language Models with Kernel Divergence](https://arxiv.org/abs/2502.00678)" by Hyeong Kyu Choi*, Maxim Khanov*, Hongxin Wei, and Yixuan Li.
 
