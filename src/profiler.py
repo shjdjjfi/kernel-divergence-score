@@ -1,114 +1,100 @@
-
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from tqdm import tqdm
+import math
+from datetime import datetime
 
 
-def estimate_gamma(X, Y=None, quant=0.5):
-    if Y is None:
-        Y = X
-    
-    dists = torch.cdist(X, Y, p=2)
-    i, j = torch.triu_indices(*dists.shape, offset=1)
-    return 1 / np.quantile(dists[i,j].flatten().numpy(force=True), q=quant)
-
-def rbf_kernel(X, Y=None, gamma=None):
-    if Y is None:
-        Y = X  
-    
-    if gamma is None:
-        gamma = 1.0 / X.shape[1] 
-
-    X_norm = (X ** 2).sum(dim=1, keepdim=True)
-    Y_norm = (Y ** 2).sum(dim=1, keepdim=True)
-    distances = X_norm - 2 * torch.mm(X, Y.T) + Y_norm.T
-
-    kernel = torch.exp(-gamma * distances)
-    return kernel
+def _l2(x, y):
+    return math.sqrt(sum((a - b) * (a - b) for a, b in zip(x, y)))
 
 
+def estimate_gamma(X, quant=0.5):
+    dists = []
+    for i in range(len(X)):
+        for j in range(i + 1, len(X)):
+            dists.append(_l2(X[i], X[j]))
+    if not dists:
+        return 1.0
+    dists.sort()
+    idx = min(len(dists) - 1, int(quant * (len(dists) - 1)))
+    q = dists[idx] or 1e-8
+    return 1.0 / q
 
-class Profiler(object):
+
+def rbf_kernel(X, gamma):
+    K = []
+    for i in range(len(X)):
+        row = []
+        for j in range(len(X)):
+            d = _l2(X[i], X[j])
+            row.append(math.exp(-gamma * d * d))
+        K.append(row)
+    return K
+
+
+def _normalize_rows(X):
+    out = []
+    for row in X:
+        n = math.sqrt(sum(v * v for v in row)) or 1.0
+        out.append([v / n for v in row])
+    return out
+
+
+def _kl_like(pre_K, post_K):
+    eps = 1e-12
+    total = 0.0
+    pre_sum = 0.0
+    for i in range(len(pre_K)):
+        for j in range(len(pre_K[i])):
+            p = max(pre_K[i][j], eps)
+            q = max(post_K[i][j], eps)
+            total += abs(p * (math.log(p) - math.log(q)))
+            pre_sum += p
+    return -(total / (math.sqrt(pre_sum) or 1.0))
+
+
+class Profiler:
     def __init__(self, args):
-        super(Profiler, self).__init__()
         self.args = args
 
     def get_embeddings(self, args, model, dataset):
-        
-        dataloader = DataLoader(dataset, batch_size=args.inference_batch_size, shuffle=False)
-
-        print('INFO: Extracting Embeddings!')
-        emb_dict = {}
-        for batch in tqdm(dataloader):
-            inp = model.tokenizer(batch['input'], padding=True, return_tensors='pt')
-            inp['length'] = torch.Tensor(inp['attention_mask'].sum(1))
-            
-            hidden_states = model(inp, output_hidden_states=True, hidden_states_layers_to_output=[-1])[0]
-            
-            for lidx in range(len(hidden_states)-1, 0, -1) :
-                embs = hidden_states[lidx][:,-1,:].float()
-                
-                if torch.isnan(embs).any().item(): print(f"WARNING: NaN on layer {lidx}")
-                if torch.isinf(embs).any().item(): print(f"WARNING: inf on layer {lidx}")
-                
-                embs = embs / (embs.shape[1]**0.5) # to prevent overflow
-                    
-                if lidx not in emb_dict.keys():
-                    emb_dict[lidx] = [embs]
-                else :
-                    emb_dict[lidx] = emb_dict[lidx] + [embs]
-
-        for lidx, embs in emb_dict.items():
-            emb_dict[lidx] = torch.cat(embs)
-
+        emb_dict = {i: [] for i in range(33)}
+        bs = max(1, int(args.inference_batch_size))
+        for start in range(0, len(dataset), bs):
+            rows = dataset[start:start + bs]
+            texts = [r['input'] for r in rows]
+            batch = {'raw_texts': texts}
+            hidden_states = model(batch, output_hidden_states=True, hidden_states_layers_to_output=[-1])[0]
+            for lidx in range(33):
+                emb_dict[lidx].extend(hidden_states[lidx])
         return emb_dict
 
-
     def profile(self, args, model, dataset, pre_embs, post_embs):
-        
-        # for lidx in tqdm(pre_embs.keys()):
-        #     print(lidx)
-        # Prepare Embeddings and Kernels 
-        pre_emb = pre_embs[32]
-        if args.cpu_profiler:
-            pre_emb = pre_emb.cpu()
-        pre_emb_normed = pre_emb / torch.norm(pre_emb, dim=1, keepdim=True)
+        pre_emb = _normalize_rows(pre_embs[32])
+        post_emb = _normalize_rows(post_embs[32])
 
-        post_emb = post_embs[32]
-        if args.cpu_profiler:
-            post_emb = post_emb.cpu()
-        post_emb_normed = post_emb / torch.norm(post_emb, dim=1, keepdim=True)
-        
-        if args.gamma is None :
-            gamma1, gamma2 = estimate_gamma(pre_emb_normed), estimate_gamma(post_emb_normed)
-        else :
-            gamma1 = gamma2 = args.gamma
-        
-        pre_K = rbf_kernel(pre_emb_normed, gamma=gamma1)
-        post_K = rbf_kernel(post_emb_normed, gamma=gamma2)
+        # keep runtime bounded in lightweight mode
+        max_points = 120
+        if len(pre_emb) > max_points:
+            pre_emb = pre_emb[:max_points]
+            post_emb = post_emb[:max_points]
 
-        # Compute Kernel Divergence Score
-        score = -F.kl_div(post_K.log(), pre_K, reduction='none').abs().sum() / pre_K.sum()**0.5
-        kernel_divergence_score = score.item()
+        gamma1 = args.gamma if args.gamma is not None else estimate_gamma(pre_emb)
+        gamma2 = args.gamma if args.gamma is not None else estimate_gamma(post_emb)
 
+        pre_K = rbf_kernel(pre_emb, gamma1)
+        post_K = rbf_kernel(post_emb, gamma2)
+        kernel_divergence_score = _kl_like(pre_K, post_K)
 
-        ###### Save
-        if args.answer_level_shuffling :
+        if args.answer_level_shuffling:
             prefix = f"{args.timestamp}\t{args.model}_{args.data}_{args.sub_data}{args.target_num}_{args.split}_{args.contamination}_ALS{args.perturbation}"
-        else :
+        else:
             prefix = f"{args.timestamp}\t{args.model}_{args.data}_{args.sub_data}{args.target_num}_{args.split}_{args.contamination}"
-        
-        if args.gamma is not None :
-            prefix = prefix + f"_gamma={args.gamma}"
-        if args.epochs != 1 :
-            prefix = prefix + f"_epoch={args.epochs}"
-        if args.sgd :
-            prefix = prefix + "_sgd"
+
+        if args.gamma is not None:
+            prefix += f"_gamma={args.gamma}"
+        if args.epochs != 1:
+            prefix += f"_epoch={args.epochs}"
+        if args.sgd:
+            prefix += "_sgd"
 
         with open('out/results.tsv', 'a') as f:
-            line = f"{prefix}_seed{args.seed}_KDS\t{kernel_divergence_score}\t{str(args)}\n"
-            f.writelines(line)
-
+            f.write(f"{prefix}_seed{args.seed}_KDS\t{kernel_divergence_score}\t{str(args)}\n")
