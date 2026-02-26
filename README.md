@@ -1,4 +1,4 @@
-# Kernel Divergence Score (Codex-packaged Detailed README)
+# Kernel Divergence Score
 
 This package is a runnable snapshot of the repository, prepared for direct download and local execution.
 
