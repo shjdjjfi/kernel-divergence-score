@@ -30,6 +30,10 @@ class LiteModelWrapper:
         self.tokenizer = LiteTokenizer()
         self.state = LiteModelState()
 
+    def fit(self, dataset, contamination, epochs=1):
+        self.state.trained = True
+        # encode both contamination and training budget so `--epochs` has measurable impact.
+        self.state.train_shift = float(contamination) * (1.0 + math.log1p(max(1, int(epochs))))
     def fit(self, dataset, contamination):
         self.state.trained = True
         self.state.train_shift = float(contamination)

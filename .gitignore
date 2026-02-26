@@ -1,3 +1,5 @@
 token
 out/*
 wandb/
+# local packaging artifacts
+*.zip
