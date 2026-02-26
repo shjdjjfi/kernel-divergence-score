@@ -1,0 +1,9 @@
+[2026-02-26 00:22:25] Running 100-epoch comparison (KDS vs MinK vs BCOS)...
+[2026-02-26 00:22:25] Command: python src/main.py --data wikimia --model mistral --target_num 700 --out_dir out/ --contamination 0.25 --sgd --lr 0.0001 --seed 0 --epochs 100
+[2026-02-26 00:22:32] Latest comparison rows:
+26/02/2026 00:22:27	mistral_wikimia_700_train_0.25_epoch=100_sgd_seed0_KDS	-16.888056015349093	Namespace(seed=0, exp_name='test', out_dir='out/', model='mistral', model_dir='/nobackup2/froilan/datasets/', memory_for_model_activations_in_gb=4, lora_alpha=32, lora_dim=8, verbose=False, epochs=100, batch_size=4, inference_batch_size=16, lr=0.0001, weight_decay=0.01, sgd=True, data_dir='/nobackup2/froilan/datasets/', data='wikimia', sub_data='', split='train', target_num=700, contamination=0.25, cpu_profiler=False, perturbation=0.05, answer_level_shuffling=False, synonym_replacement=False, random_deletion=False, word_level_shuffling=False, gamma=None, timestamp='26/02/2026 00:22:27', token='')
+26/02/2026 00:22:27	mistral_wikimia_700_train_0.25_epoch=100_sgd_seed0_MinK_BAcc	0.0	pos_rate=0.0
+26/02/2026 00:22:27	mistral_wikimia_700_train_0.25_epoch=100_sgd_seed0_BCOS_BAcc	0.25416666666666665	pos_rate=0.5083333333333333
+26/02/2026 00:22:27	mistral_wikimia_700_train_0.25_epoch=100_sgd_seed0_KDSLocal_BAcc	0.25416666666666665	local_threshold=-1.424283828818558
+26/02/2026 00:22:27	mistral_wikimia_700_train_0.25_epoch=100_sgd_seed0	MinK_BAcc=0.0000	BCOS_BAcc=0.2542	KDSLocal_BAcc=0.2542	MinK_PosRate=0.0000	BCOS_PosRate=0.5083
+[2026-02-26 00:22:32] Done. Log saved to out/compare_100epochs.log
