@@ -12,6 +12,7 @@ def train_model(args, model, dataset):
     # Lite training step to preserve pipeline semantics without heavy ML deps.
     if hasattr(model, "fit"):
         model.fit(dataset, args.contamination, epochs=args.epochs)
+        model.fit(dataset, args.contamination)
     return model
 
 

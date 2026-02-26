@@ -1,5 +1,6 @@
 import math
 import random
+from datetime import datetime
 
 
 def _l2(x, y):
@@ -169,6 +170,7 @@ class Profiler:
         pre_emb = _normalize_rows(pre_embs[32])
         post_emb = _normalize_rows(post_embs[32])
 
+        # keep runtime bounded in lightweight mode
         max_points = 120
         if len(pre_emb) > max_points:
             pre_emb = pre_emb[:max_points]
